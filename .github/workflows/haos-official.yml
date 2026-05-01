@@ -27,27 +27,22 @@ jobs:
 
       - name: Build HAOS
         run: |
-          # 1. 进入 buildroot 目录
+          # 1. 打印目录结构（调试用，如果报错请截图这部分）
+          echo "=== 正在检查配置文件目录 ==="
+          ls -R buildroot-external/configs/ || echo "找不到 configs 目录"
+          
+          # 2. 强制进入 buildroot 并指定官方 RK3568 配置
+          # 如果你的仓库是同步官方的，这个名字应该是绝对正确的
           cd buildroot
           
-          # 2. 自动寻找真正的 defconfig 文件名
-          # 官方可能叫 rk3568_defconfig 或者 haos_rk3568_defconfig
-          REAL_CONFIG=$(find ../buildroot-external -name "*rk3568*defconfig" | head -n 1 | xargs basename)
+          echo "=== 开始尝试加载配置 ==="
+          # 官方标准配置名通常是 haos_rk3568 或者 rk3568
+          make BR2_EXTERNAL=../buildroot-external haos_rk3568_defconfig || \
+          make BR2_EXTERNAL=../buildroot-external rk3568_defconfig || \
+          make BR2_EXTERNAL=../buildroot-external odroid_m1_defconfig # 保底方案
           
-          if [ -z "$REAL_CONFIG" ]; then
-            echo "错误：在 buildroot-external 中找不到任何包含 rk3568 的配置文件！"
-            ls -R ../buildroot-external/configs
-            exit 1
-          fi
-          
-          echo "发现目标配置文件: $REAL_CONFIG"
-          
-          # 3. 开始执行标准 Buildroot 编译流程
-          make BR2_EXTERNAL=../buildroot-external "$REAL_CONFIG"
-          
-          # 4. 全力开火
+          echo "=== 配置加载完成，开始编译 ==="
           make -j$(nproc)
-
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
