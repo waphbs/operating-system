@@ -1,4 +1,4 @@
-name: Build HAOS for Houzzkit F1 (Standard/M1-Hybrid)
+name: Build HAOS for Houzzkit F1 (Final Path Fix)
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ jobs:
 
       - name: Build HAOS
         run: |
-          # 1. 寻找配置文件
+          # 1. 定位配置文件
           CONF_PATH=$(find . -name "*haos_rk3568*defconfig" | head -n 1)
           if [ -z "$CONF_PATH" ]; then
             CONF_PATH=$(find . -name "*odroid_m1*defconfig" | head -n 1)
@@ -31,29 +31,37 @@ jobs:
           EXTERNAL_REL_DIR=$(dirname $(dirname "$CONF_PATH"))
           EXTERNAL_DIR="../$EXTERNAL_REL_DIR"
           
-          # 2. 权限彻底洗牌：夺回当前目录所有权
+          # 2. 权限洗牌
           sudo chown -R runner:runner .
           
-          # 3. 硬件补丁注入 (Houzzkit F1 Zigbee/串口)
+          # 3. 硬件补丁 (Houzzkit F1 UART3)
           find . -name "*.dts" -exec sed -i '/&uart2 {/i &uart3 { status = "okay"; pinctrl-names = "default"; pinctrl-0 = <&uart3m0_xfer>; };' {} +
 
           # 4. 进入编译目录
           cd buildroot
           
-          # 5. 核心修复：强制指定下载目录和标志位
-          # BR2_DL_DIR：强制所有下载文件进当前目录的 dl 文件夹，严禁去根目录 /pkgconf
-          # FORCE_UNSAFE_CONFIGURE=1：配合上面的 chown，彻底解决 root/非 root 冲突
+          # 5. 【核心修复】定义所有可能越界的路径环境变量
+          # BR2_DL_DIR: 下载目录
+          # CCACHE_DIR: 编译缓存目录，强制指向本地，防止去碰 /cache
           export BR2_DL_DIR="$(pwd)/dl"
+          export CCACHE_DIR="$(pwd)/.ccache"
           mkdir -p $BR2_DL_DIR
+          mkdir -p $CCACHE_DIR
           
-          echo "=== 开始加载配置 ==="
+          echo "=== 正在加载配置: $REAL_CONFIG ==="
+          # 显式关闭配置中的全局 ccache 路径（如果存在），或强制重定向
           make BR2_EXTERNAL="$EXTERNAL_DIR" "$REAL_CONFIG"
           
-          echo "=== 全速编译中（强制本地缓存） ==="
-          make BR2_EXTERNAL="$EXTERNAL_DIR" BR2_DL_DIR="$BR2_DL_DIR" -j$(nproc)
+          echo "=== 全力编译中（已封锁系统路径访问） ==="
+          # 再次在 make 命令行中注入变量，确保万无一失
+          make BR2_EXTERNAL="$EXTERNAL_DIR" \
+               BR2_DL_DIR="$BR2_DL_DIR" \
+               BR2_CCACHE_DIR="$CCACHE_DIR" \
+               -j$(nproc)
+
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: HAOS-Houzzkit-F1-Custom
+          name: HAOS-Houzzkit-F1-Final
           path: |
             buildroot/output/images/*.img.xz
