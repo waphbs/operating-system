@@ -1,0 +1,35 @@
+name: Build Houzzkit F1 HAOS Fix
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Prepare Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gawk wget git unzip python3 python3-pip
+
+      - name: Patch Hardware
+        run: |
+          # 自动寻找设备树并修改，开启 UART3 (CC2652P) 和双网口支持
+          find . -name "rk3568-evb1-v10.dts" -exec sed -i '/&uart2 {/i &uart3 { status = "okay"; pinctrl-names = "default"; pinctrl-0 = <&uart3m0_xfer>; };' {} +
+          echo "Patching complete!"
+
+      - name: Build HAOS
+        run: |
+          scripts/enter-usage
+          make haos-rockchip
+
+      - name: Upload Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Houzzkit-F1-HAOS-Final
+          path: output/images/*.img.xz
