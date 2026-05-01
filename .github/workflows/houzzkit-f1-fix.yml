@@ -25,8 +25,9 @@ jobs:
 
       - name: Build HAOS
         run: |
-          scripts/enter-usage
-          make haos-rockchip
+          # 尝试使用通用的编译触发方式
+          python3 -m pip install -r requirements.txt || true
+          ./scripts/build-image.sh rockchip
 
       - name: Upload Image
         uses: actions/upload-artifact@v4
