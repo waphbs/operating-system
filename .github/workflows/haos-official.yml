@@ -1,31 +1,66 @@
-- name: Build HAOS
+name: Build Official HAOS for RK3568 (Houzzkit F1)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive' # 必须递归拉取，确保 buildroot 文件夹不是空的
+          fetch-depth: 0
+
+      - name: Prepare Environment
         run: |
-          # 1. 全局搜索包含 rk3568 的 defconfig 文件并获取其完整路径
+          sudo apt-get update
+          sudo apt-get install -y build-essential bzip2 wget perl tar rsync xz-utils libncurses5-dev
+          sudo apt-get install -y qemu-utils python3-dev device-tree-compiler python3-setuptools
+
+      - name: Patch Hardware (Houzzkit F1 Special)
+        run: |
+          # 全局搜索设备树并注入 UART3 补丁（开启 Zigbee/串口支持）
+          find . -name "rk3568-evb1-v10.dts" -exec sed -i '/&uart2 {/i &uart3 { status = "okay"; pinctrl-names = "default"; pinctrl-0 = <&uart3m0_xfer>; };' {} +
+          echo "Hardware patch injected into DTS files."
+
+      - name: Build HAOS
+        run: |
+          # 1. 深度搜索包含 rk3568 的配置文件路径
           CONF_PATH=$(find . -name "*rk3568*defconfig" | head -n 1)
           
           if [ -z "$CONF_PATH" ]; then
-            echo "错误：全盘搜索也没找到 rk3568 配置文件！"
-            echo "当前目录结构如下："
-            ls -R | grep "defconfig" || echo "仓库里可能一个 defconfig 都没有"
+            echo "Error: Could not find any rk3568 defconfig file in the repository!"
             exit 1
           fi
           
-          echo "定位到配置文件路径: $CONF_PATH"
+          echo "Located config at: $CONF_PATH"
           
-          # 2. 提取文件名和所在的外部目录路径
+          # 2. 提取文件名和自动识别外部配置目录 (External Dir)
           REAL_CONFIG=$(basename "$CONF_PATH")
-          # 自动识别外部目录（通常是 configs 的上一级）
-          EXTERNAL_DIR=$(dirname $(dirname "$CONF_PATH"))
+          # 配置文件通常在 buildroot-external/configs/ 下，向上推两级得到 external 根目录
+          EXTERNAL_REL_DIR=$(dirname $(dirname "$CONF_PATH"))
+          # 获取相对于 buildroot 目录的路径（需要加 ../）
+          EXTERNAL_DIR="../$EXTERNAL_REL_DIR"
           
-          echo "识别到外部目录: $EXTERNAL_DIR"
-          echo "识别到目标配置: $REAL_CONFIG"
+          echo "Identified External Directory: $EXTERNAL_DIR"
+          echo "Identified Config Name: $REAL_CONFIG"
           
-          # 3. 进入 buildroot 目录开始编译
+          # 3. 进入编译主战场
           cd buildroot
           
-          # 4. 加载配置（使用绝对/相对路径确保 make 能找到）
-          # 注意：EXTERNAL_DIR 相对于 buildroot 目录需要加 ../
-          make BR2_EXTERNAL=../$EXTERNAL_DIR "$REAL_CONFIG"
+          # 4. 加载配置
+          make BR2_EXTERNAL="$EXTERNAL_DIR" "$REAL_CONFIG"
           
-          # 5. 暴力开火，使用 sudo 解决之前的权限问题
-          sudo make BR2_EXTERNAL=../$EXTERNAL_DIR -j$(nproc)
+          # 5. 暴力开火，使用 sudo 解决 mkdir Permission denied 问题
+          # 使用 -j$(nproc) 调用所有核心加速
+          sudo make BR2_EXTERNAL="$EXTERNAL_DIR" -j$(nproc)
+
+      - name: Upload Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: HAOS-RK3568-Houzzkit-F1
+          path: |
+            buildroot/output/images/*.img.xz
+            buildroot/output/images/*.build-stats
