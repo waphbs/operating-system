@@ -21,7 +21,7 @@ jobs:
 
       - name: Build HAOS
         run: |
-          # 1. 寻找配置文件（保持上一版逻辑）
+          # 1. 寻找配置文件
           CONF_PATH=$(find . -name "*haos_rk3568*defconfig" | head -n 1)
           if [ -z "$CONF_PATH" ]; then
             CONF_PATH=$(find . -name "*odroid_m1*defconfig" | head -n 1)
@@ -31,19 +31,26 @@ jobs:
           EXTERNAL_REL_DIR=$(dirname $(dirname "$CONF_PATH"))
           EXTERNAL_DIR="../$EXTERNAL_REL_DIR"
           
-          # 2. 核心修复：把所有权夺回来，不用 sudo 跑编译
-          # 这样既有读写权限，又不会触发 "run as root" 的报错
+          # 2. 权限彻底洗牌：夺回当前目录所有权
           sudo chown -R runner:runner .
           
-          # 3. 硬件补丁注入
+          # 3. 硬件补丁注入 (Houzzkit F1 Zigbee/串口)
           find . -name "*.dts" -exec sed -i '/&uart2 {/i &uart3 { status = "okay"; pinctrl-names = "default"; pinctrl-0 = <&uart3m0_xfer>; };' {} +
 
-          # 4. 开始编译（不带 sudo）
+          # 4. 进入编译目录
           cd buildroot
+          
+          # 5. 核心修复：强制指定下载目录和标志位
+          # BR2_DL_DIR：强制所有下载文件进当前目录的 dl 文件夹，严禁去根目录 /pkgconf
+          # FORCE_UNSAFE_CONFIGURE=1：配合上面的 chown，彻底解决 root/非 root 冲突
+          export BR2_DL_DIR="$(pwd)/dl"
+          mkdir -p $BR2_DL_DIR
+          
+          echo "=== 开始加载配置 ==="
           make BR2_EXTERNAL="$EXTERNAL_DIR" "$REAL_CONFIG"
           
-          # 直接使用普通用户权限跑，加速编译
-          make BR2_EXTERNAL="$EXTERNAL_DIR" -j$(nproc)
+          echo "=== 全速编译中（强制本地缓存） ==="
+          make BR2_EXTERNAL="$EXTERNAL_DIR" BR2_DL_DIR="$BR2_DL_DIR" -j$(nproc)
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
