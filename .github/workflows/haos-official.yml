@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04  # 官方推荐环境
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -16,34 +16,28 @@ jobs:
       - name: Prepare Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            build-essential bash bc bzip2 perl tar rsync xz-utils wget \
-            git libncurses5-dev python3 python3-pip python3-setuptools \
-            python3-wheel unzip zip device-tree-compiler
+          sudo apt-get install -y build-essential bzip2 wget perl tar rsync xz-utils libncurses5-dev
+          sudo apt-get install -y qemu-utils python3-dev device-tree-compiler
 
       - name: Patch Hardware (Houzzkit F1 Special)
         run: |
-          # 官方仓库里这个文件的标准路径如下
-          FILE="buildroot-external/board/haos/rockchip/patches/linux/rk3568-evb1-v10.dts"
-          if [ -f "$FILE" ]; then
-            sed -i '/&uart2 {/i &uart3 { status = "okay"; pinctrl-names = "default"; pinctrl-0 = <&uart3m0_xfer>; };' "$FILE"
-            echo "硬件补丁已注入"
-          else
-            # 如果路径变了，执行全盘搜索保底
-            find . -name "rk3568-evb1-v10.dts" -exec sed -i '/&uart2 {/i &uart3 { status = "okay"; pinctrl-names = "default"; pinctrl-0 = <&uart3m0_xfer>; };' {} +
-            echo "使用搜索模式完成补丁"
-          fi
+          # 全盘搜索设备树文件并注入串口补丁
+          find . -name "rk3568-evb1-v10.dts" -exec sed -i '/&uart2 {/i &uart3 { status = "okay"; pinctrl-names = "default"; pinctrl-0 = <&uart3m0_xfer>; };' {} +
+          echo "Hardware patch applied."
 
       - name: Build HAOS
         run: |
-          # 1. 尝试官方标准的编译入口
-          # 官方在 dev 分支通常支持直接通过 make 配合板子名称编译
-          # 针对 RK3568，标准目标通常是 rk3568
-          
-          make rk3568 || make haos-rk3568 || {
-            echo "找不到直接的 make 目标，尝试进入构建环境..."
-            ./scripts/enter-usage make rk3568
-          }
+          # 自动寻找编译脚本，解决 scripts 目录找不到的问题
+          SCRIPT_PATH=$(find . -name "enter-usage" | head -n 1)
+          if [ -n "$SCRIPT_PATH" ]; then
+            chmod +x "$SCRIPT_PATH"
+            $SCRIPT_PATH make haos-rk3568
+          else
+            echo "Warning: enter-usage not found, trying direct build..."
+            cd buildroot
+            make BR2_EXTERNAL=../buildroot-external haos_rk3568_defconfig
+            make -j$(nproc)
+          fi
 
       - name: Upload Image
         uses: actions/upload-artifact@v4
@@ -51,4 +45,3 @@ jobs:
           name: HAOS-RK3568-Houzzkit
           path: |
             output/images/*.img.xz
-            output/images/*.build-stats
