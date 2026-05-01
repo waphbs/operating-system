@@ -21,35 +21,29 @@ jobs:
 
       - name: Build HAOS
         run: |
-          # 1. 寻找最合适的配置文件
-          # 优先找官方 rk3568，找不到就拿 odroid_m1 顶上
+          # 1. 寻找配置文件（保持上一版逻辑）
           CONF_PATH=$(find . -name "*haos_rk3568*defconfig" | head -n 1)
           if [ -z "$CONF_PATH" ]; then
-            echo "未找到专用配置，正在寻找 Odroid M1 配置..."
             CONF_PATH=$(find . -name "*odroid_m1*defconfig" | head -n 1)
           fi
-
-          if [ -z "$CONF_PATH" ]; then
-            echo "错误：仓库里连 M1 的配置都没有，请检查子模块拉取情况！"
-            exit 1
-          fi
-
-          echo "定位到基础配置文件: $CONF_PATH"
+          
           REAL_CONFIG=$(basename "$CONF_PATH")
           EXTERNAL_REL_DIR=$(dirname $(dirname "$CONF_PATH"))
           EXTERNAL_DIR="../$EXTERNAL_REL_DIR"
-
-          # 2. 注入 Houzzkit 特有的硬件补丁（强制开启 UART3 和优化）
-          # 我们在编译前把补丁打进内核源码里
+          
+          # 2. 核心修复：把所有权夺回来，不用 sudo 跑编译
+          # 这样既有读写权限，又不会触发 "run as root" 的报错
+          sudo chown -R runner:runner .
+          
+          # 3. 硬件补丁注入
           find . -name "*.dts" -exec sed -i '/&uart2 {/i &uart3 { status = "okay"; pinctrl-names = "default"; pinctrl-0 = <&uart3m0_xfer>; };' {} +
 
-          # 3. 开始编译
+          # 4. 开始编译（不带 sudo）
           cd buildroot
           make BR2_EXTERNAL="$EXTERNAL_DIR" "$REAL_CONFIG"
           
-          # 使用 sudo 解决 mkdir 权限问题
-          sudo make BR2_EXTERNAL="$EXTERNAL_DIR" -j$(nproc)
-
+          # 直接使用普通用户权限跑，加速编译
+          make BR2_EXTERNAL="$EXTERNAL_DIR" -j$(nproc)
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
