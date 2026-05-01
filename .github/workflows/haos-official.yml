@@ -36,9 +36,14 @@ jobs:
 
       - name: Build HAOS
         run: |
-          # 官方标准：先进入构建环境，再执行 make
-          # 针对 RK3568 板子，官方 target 通常是 rk3568
-          ./scripts/enter-usage make haos-rk3568 || make haos-rk3568
+          # 1. 尝试官方标准的编译入口
+          # 官方在 dev 分支通常支持直接通过 make 配合板子名称编译
+          # 针对 RK3568，标准目标通常是 rk3568
+          
+          make rk3568 || make haos-rk3568 || {
+            echo "找不到直接的 make 目标，尝试进入构建环境..."
+            ./scripts/enter-usage make rk3568
+          }
 
       - name: Upload Image
         uses: actions/upload-artifact@v4
