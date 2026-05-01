@@ -27,17 +27,26 @@ jobs:
 
       - name: Build HAOS
         run: |
-          # 自动寻找编译脚本，解决 scripts 目录找不到的问题
-          SCRIPT_PATH=$(find . -name "enter-usage" | head -n 1)
-          if [ -n "$SCRIPT_PATH" ]; then
-            chmod +x "$SCRIPT_PATH"
-            $SCRIPT_PATH make haos-rk3568
-          else
-            echo "Warning: enter-usage not found, trying direct build..."
-            cd buildroot
-            make BR2_EXTERNAL=../buildroot-external haos_rk3568_defconfig
-            make -j$(nproc)
+          # 1. 进入 buildroot 目录
+          cd buildroot
+          
+          # 2. 自动寻找真正的 defconfig 文件名
+          # 官方可能叫 rk3568_defconfig 或者 haos_rk3568_defconfig
+          REAL_CONFIG=$(find ../buildroot-external -name "*rk3568*defconfig" | head -n 1 | xargs basename)
+          
+          if [ -z "$REAL_CONFIG" ]; then
+            echo "错误：在 buildroot-external 中找不到任何包含 rk3568 的配置文件！"
+            ls -R ../buildroot-external/configs
+            exit 1
           fi
+          
+          echo "发现目标配置文件: $REAL_CONFIG"
+          
+          # 3. 开始执行标准 Buildroot 编译流程
+          make BR2_EXTERNAL=../buildroot-external "$REAL_CONFIG"
+          
+          # 4. 全力开火
+          make -j$(nproc)
 
       - name: Upload Image
         uses: actions/upload-artifact@v4
