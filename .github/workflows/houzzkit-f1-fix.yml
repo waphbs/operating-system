@@ -25,9 +25,21 @@ jobs:
 
       - name: Build HAOS
         run: |
-          # 尝试使用通用的编译触发方式
-          python3 -m pip install -r requirements.txt || true
-          ./scripts/build-image.sh rockchip
+          # 1. 自动寻找编译脚本并赋予执行权限
+          BUILD_SCRIPT=$(find . -name "build-image.sh" -o -name "enter-usage" | head -n 1)
+          if [ -z "$BUILD_SCRIPT" ]; then
+            echo "找不到脚本，尝试直接调用 Makefile..."
+            make haos-rockchip || make rockchip
+          else
+            echo "找到脚本: $BUILD_SCRIPT"
+            chmod +x "$BUILD_SCRIPT"
+            # 2. 根据找到的脚本类型执行编译
+            if [[ "$BUILD_SCRIPT" == *"enter-usage"* ]]; then
+              $BUILD_SCRIPT make haos-rockchip
+            else
+              $BUILD_SCRIPT rockchip
+            fi
+          fi
 
       - name: Upload Image
         uses: actions/upload-artifact@v4
