@@ -1,0 +1,49 @@
+name: Build Official HAOS for RK3568
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04  # 官方推荐环境
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          fetch-depth: 0
+
+      - name: Prepare Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential bash bc bzip2 perl tar rsync xz-utils wget \
+            git libncurses5-dev python3 python3-pip python3-setuptools \
+            python3-wheel unzip zip device-tree-compiler
+
+      - name: Patch Hardware (Houzzkit F1 Special)
+        run: |
+          # 官方仓库里这个文件的标准路径如下
+          FILE="buildroot-external/board/haos/rockchip/patches/linux/rk3568-evb1-v10.dts"
+          if [ -f "$FILE" ]; then
+            sed -i '/&uart2 {/i &uart3 { status = "okay"; pinctrl-names = "default"; pinctrl-0 = <&uart3m0_xfer>; };' "$FILE"
+            echo "硬件补丁已注入"
+          else
+            # 如果路径变了，执行全盘搜索保底
+            find . -name "rk3568-evb1-v10.dts" -exec sed -i '/&uart2 {/i &uart3 { status = "okay"; pinctrl-names = "default"; pinctrl-0 = <&uart3m0_xfer>; };' {} +
+            echo "使用搜索模式完成补丁"
+          fi
+
+      - name: Build HAOS
+        run: |
+          # 官方标准：先进入构建环境，再执行 make
+          # 针对 RK3568 板子，官方 target 通常是 rk3568
+          ./scripts/enter-usage make haos-rk3568 || make haos-rk3568
+
+      - name: Upload Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: HAOS-RK3568-Houzzkit
+          path: |
+            output/images/*.img.xz
+            output/images/*.build-stats
