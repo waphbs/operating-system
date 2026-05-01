@@ -1,0 +1,36 @@
+name: Build Houzzkit F1 HAOS
+
+on:
+  workflow_dispatch: # 允许老哥手动点按钮开始
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Prepare Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gawk wget git unzip python3 python3-pip
+
+      - name: Patch for CC2652P & Dual GMAC
+        run: |
+          # 自动修改设备树，开启 UART3 (CC2652P) 和双网口支持
+          sed -i '/&uart2 {/i &uart3 { status = "okay"; pinctrl-names = "default"; pinctrl-0 = <&uart3m0_xfer>; };' src/linux/arch/arm64/boot/dts/rockchip/rk3568-evb1-v10.dts
+          echo "Hardware patches applied for Houzzkit F1!"
+
+      - name: Build HAOS
+        run: |
+          # 模拟生产流程
+          scripts/enter-usage
+          make haos-rockchip
+
+      - name: Upload Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Houzzkit-F1-HAOS-Final
+          path: output/images/*.img.xz
