@@ -1,4 +1,4 @@
-name: Build HAOS for Houzzkit F1 (Final Persistent Edition)
+name: Build HAOS for Houzzkit F1 (Storage & Path Fixed)
 
 on:
   workflow_dispatch:
@@ -6,24 +6,31 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    # 设置 6 小时超时上限，争取跑完
-    timeout-minutes: 360 
-    
+    timeout-minutes: 360
+
     steps:
+      - name: Maximize Build Space
+        run: |
+          # 疯狂清理预装软件，腾出约 20GB 空间
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf /usr/lib/jvm
+          sudo docker image prune -a -f
+
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
           submodules: 'recursive'
           fetch-depth: 0
 
-      # --- 核心：断点续传缓存 ---
       - name: Cache Buildroot
         uses: actions/cache@v4
         with:
           path: |
             buildroot/dl
             buildroot/.ccache
-          # 根据配置文件内容生成特征值，只要配置没变，缓存就有效
           key: ${{ runner.os }}-buildroot-${{ hashFiles('**/defconfig') }}
           restore-keys: |
             ${{ runner.os }}-buildroot-
@@ -36,7 +43,7 @@ jobs:
 
       - name: Build HAOS
         run: |
-          # 1. 定位配置 (保持逻辑)
+          # 1. 自动定位配置
           CONF_PATH=$(find . -name "*haos_rk3568*defconfig" | head -n 1)
           if [ -z "$CONF_PATH" ]; then
             CONF_PATH=$(find . -name "*odroid_m1*defconfig" | head -n 1)
@@ -46,32 +53,32 @@ jobs:
           EXTERNAL_REL_DIR=$(dirname $(dirname "$CONF_PATH"))
           EXTERNAL_DIR="../$EXTERNAL_REL_DIR"
           
-          # 2. 权限与目录修复 (核心：创建 /build 并给权限)
+          # 2. 权限与目录修复（创建 /build 防止签名报错）
           sudo chown -R runner:runner .
           sudo mkdir -p /build
           sudo chown runner:runner /build
           
-          # 3. 硬件补丁 (UART3)
+          # 3. 硬件补丁 (UART3 注入)
           find . -name "*.dts" -exec sed -i '/&uart2 {/i &uart3 { status = "okay"; pinctrl-names = "default"; pinctrl-0 = <&uart3m0_xfer>; };' {} +
 
-          # 4. 进入编译目录并注入环境变量
+          # 4. 进入编译目录
           cd buildroot
           export BR2_DL_DIR="$(pwd)/dl"
           export CCACHE_DIR="$(pwd)/.ccache"
           mkdir -p $BR2_DL_DIR
           mkdir -p $CCACHE_DIR
           
-          # 5. 加载配置并编译
+          # 5. 加载配置并全速编译
           make BR2_EXTERNAL="$EXTERNAL_DIR" "$REAL_CONFIG"
-          # 特别注意：即使我们创建了 /build，也要配合权限跑完最后一步
           make BR2_EXTERNAL="$EXTERNAL_DIR" \
                BR2_DL_DIR="$BR2_DL_DIR" \
                BR2_CCACHE_DIR="$CCACHE_DIR" \
                -j$(nproc)
+
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: HAOS-Houzzkit-F1-Final-Image
+          name: HAOS-Houzzkit-F1-Image
           path: |
             buildroot/output/images/*.img.xz
             buildroot/output/images/*.build-stats
