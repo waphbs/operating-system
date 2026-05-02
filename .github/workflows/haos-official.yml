@@ -1,4 +1,4 @@
-name: Build HAOS for Houzzkit F1 (Final Path Fix)
+name: Build HAOS for Houzzkit F1 (Final Persistent Edition)
 
 on:
   workflow_dispatch:
@@ -6,6 +6,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    # 设置 6 小时超时上限，争取跑完
+    timeout-minutes: 360 
+    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -13,47 +16,64 @@ jobs:
           submodules: 'recursive'
           fetch-depth: 0
 
+      # --- 核心：断点续传缓存 ---
+      - name: Cache Buildroot
+        uses: actions/cache@v4
+        with:
+          path: |
+            buildroot/dl
+            buildroot/.ccache
+          # 根据配置文件内容生成特征值，只要配置没变，缓存就有效
+          key: ${{ runner.os }}-buildroot-${{ hashFiles('**/defconfig') }}
+          restore-keys: |
+            ${{ runner.os }}-buildroot-
+
       - name: Prepare Environment
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential bzip2 wget perl tar rsync xz-utils libncurses5-dev
-          sudo apt-get install -y qemu-utils python3-dev device-tree-compiler
+          sudo apt-get install -y qemu-utils python3-dev device-tree-compiler python3-setuptools
 
       - name: Build HAOS
         run: |
-          # 1. 定位配置文件
+          # 1. 自动寻找配置文件 (优先找 rk3568，找不到用 m1 顶替)
           CONF_PATH=$(find . -name "*haos_rk3568*defconfig" | head -n 1)
           if [ -z "$CONF_PATH" ]; then
+            echo "未找到专用配置，正在切换至 Odroid M1 适配..."
             CONF_PATH=$(find . -name "*odroid_m1*defconfig" | head -n 1)
+          fi
+          
+          if [ -z "$CONF_PATH" ]; then
+            echo "错误：未发现任何匹配的配置文件！"
+            exit 1
           fi
           
           REAL_CONFIG=$(basename "$CONF_PATH")
           EXTERNAL_REL_DIR=$(dirname $(dirname "$CONF_PATH"))
           EXTERNAL_DIR="../$EXTERNAL_REL_DIR"
           
-          # 2. 权限洗牌
+          # 2. 权限洗牌：确保当前用户拥有完全控制权，避开 root 编译限制
           sudo chown -R runner:runner .
           
-          # 3. 硬件补丁 (Houzzkit F1 UART3)
+          # 3. 硬件补丁注入 (针对 Houzzkit F1 的 UART3/Zigbee 适配)
           find . -name "*.dts" -exec sed -i '/&uart2 {/i &uart3 { status = "okay"; pinctrl-names = "default"; pinctrl-0 = <&uart3m0_xfer>; };' {} +
+          echo "补丁已注入：$REAL_CONFIG"
 
-          # 4. 进入编译目录
+          # 4. 进入编译主目录
           cd buildroot
           
-          # 5. 【核心修复】定义所有可能越界的路径环境变量
-          # BR2_DL_DIR: 下载目录
-          # CCACHE_DIR: 编译缓存目录，强制指向本地，防止去碰 /cache
+          # 5. 路径重定向：强制所有产物留在本地，解决 /cache 和 /pkgconf 权限拒绝问题
           export BR2_DL_DIR="$(pwd)/dl"
           export CCACHE_DIR="$(pwd)/.ccache"
           mkdir -p $BR2_DL_DIR
           mkdir -p $CCACHE_DIR
           
-          echo "=== 正在加载配置: $REAL_CONFIG ==="
-          # 显式关闭配置中的全局 ccache 路径（如果存在），或强制重定向
+          # 6. 开始编译
+          echo "=== 正在加载配置 ==="
           make BR2_EXTERNAL="$EXTERNAL_DIR" "$REAL_CONFIG"
           
-          echo "=== 全力编译中（已封锁系统路径访问） ==="
-          # 再次在 make 命令行中注入变量，确保万无一失
+          echo "=== 开始全速构建 (使用缓存路径) ==="
+          # 在 make 指令中再次声明变量，确保环境变量穿透
           make BR2_EXTERNAL="$EXTERNAL_DIR" \
                BR2_DL_DIR="$BR2_DL_DIR" \
                BR2_CCACHE_DIR="$CCACHE_DIR" \
@@ -62,6 +82,7 @@ jobs:
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: HAOS-Houzzkit-F1-Final
+          name: HAOS-Houzzkit-F1-Final-Image
           path: |
             buildroot/output/images/*.img.xz
+            buildroot/output/images/*.build-stats
