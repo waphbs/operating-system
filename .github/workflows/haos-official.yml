@@ -36,49 +36,38 @@ jobs:
 
       - name: Build HAOS
         run: |
-          # 1. 自动寻找配置文件 (优先找 rk3568，找不到用 m1 顶替)
+          # 1. 定位配置 (保持逻辑)
           CONF_PATH=$(find . -name "*haos_rk3568*defconfig" | head -n 1)
           if [ -z "$CONF_PATH" ]; then
-            echo "未找到专用配置，正在切换至 Odroid M1 适配..."
             CONF_PATH=$(find . -name "*odroid_m1*defconfig" | head -n 1)
-          fi
-          
-          if [ -z "$CONF_PATH" ]; then
-            echo "错误：未发现任何匹配的配置文件！"
-            exit 1
           fi
           
           REAL_CONFIG=$(basename "$CONF_PATH")
           EXTERNAL_REL_DIR=$(dirname $(dirname "$CONF_PATH"))
           EXTERNAL_DIR="../$EXTERNAL_REL_DIR"
           
-          # 2. 权限洗牌：确保当前用户拥有完全控制权，避开 root 编译限制
+          # 2. 权限与目录修复 (核心：创建 /build 并给权限)
           sudo chown -R runner:runner .
+          sudo mkdir -p /build
+          sudo chown runner:runner /build
           
-          # 3. 硬件补丁注入 (针对 Houzzkit F1 的 UART3/Zigbee 适配)
+          # 3. 硬件补丁 (UART3)
           find . -name "*.dts" -exec sed -i '/&uart2 {/i &uart3 { status = "okay"; pinctrl-names = "default"; pinctrl-0 = <&uart3m0_xfer>; };' {} +
-          echo "补丁已注入：$REAL_CONFIG"
 
-          # 4. 进入编译主目录
+          # 4. 进入编译目录并注入环境变量
           cd buildroot
-          
-          # 5. 路径重定向：强制所有产物留在本地，解决 /cache 和 /pkgconf 权限拒绝问题
           export BR2_DL_DIR="$(pwd)/dl"
           export CCACHE_DIR="$(pwd)/.ccache"
           mkdir -p $BR2_DL_DIR
           mkdir -p $CCACHE_DIR
           
-          # 6. 开始编译
-          echo "=== 正在加载配置 ==="
+          # 5. 加载配置并编译
           make BR2_EXTERNAL="$EXTERNAL_DIR" "$REAL_CONFIG"
-          
-          echo "=== 开始全速构建 (使用缓存路径) ==="
-          # 在 make 指令中再次声明变量，确保环境变量穿透
+          # 特别注意：即使我们创建了 /build，也要配合权限跑完最后一步
           make BR2_EXTERNAL="$EXTERNAL_DIR" \
                BR2_DL_DIR="$BR2_DL_DIR" \
                BR2_CCACHE_DIR="$CCACHE_DIR" \
                -j$(nproc)
-
       - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
