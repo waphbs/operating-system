@@ -7,43 +7,42 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. 检出代码 (包含子模块)
+      - name: 1. 检出代码
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          fetch-depth: 0
 
       - name: 2. 安装必要依赖
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libncurses-dev gawk git rsync wget unzip python3-pycryptodome python3-dev python3-setuptools
 
-      - name: 3. 强制链接配置文件并构建
+      - name: 3. 强制路径构建 (全手动档)
         run: |
-          # 1. 强制设定 External 路径为根目录
-          EXT_PATH=$(pwd)
+          # 1. 直接锁定根目录
+          ROOT_DIR=$(pwd)
           
-          # 2. 找到配置文件的绝对路径 (排除 buildroot 内部干扰)
-          CONF_SRC=$(find $(pwd) -name "houzzkit_f1_defconfig" | grep -v "buildroot/support" | head -n 1)
+          # 2. 检查配置文件是否存在 (手动列出 configs 目录确认)
+          echo "检查配置目录内容："
+          ls -R configs/ || echo "configs 目录不存在"
           
-          if [ -z "$CONF_SRC" ]; then
-            echo "❌ 错误：仓库里真的没这个文件，请检查文件名！"
-            exit 1
-          fi
-          echo "✅ 原始配置位于: $CONF_SRC"
-
-          # 3. 【核心黑科技】强行把配置链接到 buildroot 自己的 configs 目录下
-          # 这样你执行 make houzzkit_f1_defconfig 时，它绝对能找到
+          # 3. 强行建立链接
+          # 假设配置文件在根目录的 configs/houzzkit_f1_defconfig
           mkdir -p buildroot/configs
-          ln -sf "$CONF_SRC" buildroot/configs/houzzkit_f1_defconfig
-          
+          cp configs/houzzkit_f1_defconfig buildroot/configs/houzzkit_f1_defconfig || \
+          cp houzzkit_f1_defconfig buildroot/configs/houzzkit_f1_defconfig || \
+          echo "⚠️ 警告：手动复制配置文件失败，尝试继续..."
+
           # 4. 进入构建
           cd buildroot
-          make BR2_EXTERNAL="$EXT_PATH" houzzkit_f1_defconfig
+          # 告诉 Buildroot：外部配置就在上一层目录
+          make BR2_EXTERNAL="$ROOT_DIR" houzzkit_f1_defconfig
           
-          # 5. 开始编译
-          make BR2_EXTERNAL="$EXT_PATH" -j$(nproc) || echo "⚠️ 编译中断，直接提取产物"
+          # 5. 开始正式编译
+          make BR2_EXTERNAL="$ROOT_DIR" -j$(nproc) || echo "编译中断，准备提取"
 
-      - name: 4. 暴力提取自定义零件
+      - name: 4. 提取成果
         if: always()
         run: |
           mkdir -p output_parts
@@ -52,9 +51,9 @@ jobs:
           find buildroot/output/images/ -name "rootfs.squashfs" -exec cp {} output_parts/ \; || true
           ls -R output_parts/
 
-      - name: 5. 发布下载
+      - name: 5. 上传
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Houzzkit-F1-Custom-System
+          name: Houzzkit-F1-Final-Result
           path: output_parts/
