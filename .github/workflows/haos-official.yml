@@ -44,40 +44,37 @@ jobs:
 
       - name: Build HAOS
         run: |
-          # 1. 定位配置
+          # 1. 自动定位 (保持原有逻辑)
           CONF_PATH=$(find . -name "*haos_rk3568*defconfig" | head -n 1)
           if [ -z "$CONF_PATH" ]; then
             CONF_PATH=$(find . -name "*odroid_m1*defconfig" | head -n 1)
           fi
-          
           REAL_CONFIG=$(basename "$CONF_PATH")
-          EXTERNAL_REL_DIR=$(dirname $(dirname "$CONF_PATH"))
-          EXTERNAL_DIR="../$EXTERNAL_REL_DIR"
+          EXTERNAL_DIR="../$(dirname $(dirname "$CONF_PATH"))"
           
-          # 2. 权限与固件签名目录修复
-          sudo chown -R runner:runner .
+          # 2. 权限与固件签名目录硬核修复
           sudo mkdir -p /build
-          sudo chown runner:runner /build
+          sudo chown -R runner:runner . /build
           
-          # 3. 硬件补丁 (UART3/Zigbee 适配)
+          # 3. 注入 UART3 补丁
           find . -name "*.dts" -exec sed -i '/&uart2 {/i &uart3 { status = "okay"; pinctrl-names = "default"; pinctrl-0 = <&uart3m0_xfer>; };' {} +
 
-          # 4. 进入编译目录并定义本地路径
+          # 4. 进入编译目录
           cd buildroot
           export BR2_DL_DIR="$(pwd)/dl"
           export CCACHE_DIR="$(pwd)/.ccache"
-          mkdir -p $BR2_DL_DIR
-          mkdir -p $CCACHE_DIR
           
           # 5. 加载配置
           make BR2_EXTERNAL="$EXTERNAL_DIR" "$REAL_CONFIG"
           
-          # 6. 开始编译 (稍微限制线程，防止撑爆)
-          # 使用 nproc-1 留一点喘息余地给系统，增加稳定性
+          # 6. 【关键变动】禁用不必要的统计输出，减少磁盘 IO 和空间占用
+          # 同时使用 -j2 稍微放慢速度，确保最后打包阶段不会因为内存瞬间撑爆而 EOF
           make BR2_EXTERNAL="$EXTERNAL_DIR" \
                BR2_DL_DIR="$BR2_DL_DIR" \
                BR2_CCACHE_DIR="$CCACHE_DIR" \
-               -j$(($(nproc)-1))
+               BR2_GRAPH_OUT= \
+               BR2_INSTRUMENTATION_SCRIPTS= \
+               -j2
 
       - name: Upload Image
         uses: actions/upload-artifact@v4
