@@ -1,4 +1,4 @@
-name: Build Houzzkit F1 Custom HAOS
+name: Build Houzzkit F1 HAOS
 
 on:
   workflow_dispatch:
@@ -17,45 +17,44 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential libncurses-dev gawk git rsync wget unzip python3-pycryptodome python3-dev python3-setuptools
 
-      - name: 3. 强制路径定位与构建
+      - name: 3. 强制链接配置文件并构建
         run: |
-          # 1. 定位 External 根目录 (排除 buildroot 内部的干扰路径)
-          # 我们只需要包含 external.desc 且层级最浅的那个目录
-          REAL_EXT_PATH=$(find $(pwd) -maxdepth 2 -name "external.desc" -exec dirname {} \; | head -n 1)
-          echo "✅ 确定真正的 External 路径: $REAL_EXT_PATH"
+          # 1. 强制设定 External 路径为根目录
+          EXT_PATH=$(pwd)
           
-          # 2. 定位配置文件的绝对路径
-          CONF_FILE=$(find $(pwd) -name "houzzkit_f1_defconfig" | grep -v "buildroot/support" | head -n 1)
-          if [ -z "$CONF_FILE" ]; then
-            echo "❌ 错误：依然找不到 houzzkit_f1_defconfig"
+          # 2. 找到配置文件的绝对路径 (排除 buildroot 内部干扰)
+          CONF_SRC=$(find $(pwd) -name "houzzkit_f1_defconfig" | grep -v "buildroot/support" | head -n 1)
+          
+          if [ -z "$CONF_SRC" ]; then
+            echo "❌ 错误：仓库里真的没这个文件，请检查文件名！"
             exit 1
           fi
-          echo "✅ 确定配置文件路径: $CONF_FILE"
+          echo "✅ 原始配置位于: $CONF_SRC"
+
+          # 3. 【核心黑科技】强行把配置链接到 buildroot 自己的 configs 目录下
+          # 这样你执行 make houzzkit_f1_defconfig 时，它绝对能找到
+          mkdir -p buildroot/configs
+          ln -sf "$CONF_SRC" buildroot/configs/houzzkit_f1_defconfig
           
-          # 3. 进入 buildroot 目录开始构建
+          # 4. 进入构建
           cd buildroot
+          make BR2_EXTERNAL="$EXT_PATH" houzzkit_f1_defconfig
           
-          # 核心：使用 DEFCONFIG 变量直接加载文件绝对路径，绕过所有目录查找逻辑
-          make BR2_EXTERNAL="$REAL_EXT_PATH" DEFCONFIG="$CONF_FILE" alldefconfig
-          
-          # 4. 开始全力编译
-          make BR2_EXTERNAL="$REAL_EXT_PATH" -j$(nproc) || echo "⚠️ 编译部分中断，准备提取产物"
+          # 5. 开始编译
+          make BR2_EXTERNAL="$EXT_PATH" -j$(nproc) || echo "⚠️ 编译中断，直接提取产物"
 
       - name: 4. 暴力提取自定义零件
         if: always()
         run: |
-          mkdir -p my_f1_parts
-          # 深度搜索已生成的 Image, dtb 和 rootfs
-          find . -name "Image" -exec cp {} my_f1_parts/ \; || true
-          find . -name "*.dtb" -exec cp {} my_f1_parts/ \; || true
-          find . -name "rootfs.squashfs" -exec cp {} my_f1_parts/ \; || true
-          
-          echo "检查抓取到的零件："
-          ls -R my_f1_parts/
+          mkdir -p output_parts
+          find buildroot/output/images/ -name "Image" -exec cp {} output_parts/ \; || true
+          find buildroot/output/images/ -name "*.dtb" -exec cp {} output_parts/ \; || true
+          find buildroot/output/images/ -name "rootfs.squashfs" -exec cp {} output_parts/ \; || true
+          ls -R output_parts/
 
-      - name: 5. 发布下载区
+      - name: 5. 发布下载
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Houzzkit-F1-Custom-System
-          path: my_f1_parts/
+          path: output_parts/
