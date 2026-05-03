@@ -1,4 +1,4 @@
-name: Build Houzzkit F1 Custom HAOS
+name: Build Houzzkit F1 HAOS
 
 on:
   workflow_dispatch:
@@ -17,48 +17,39 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential libncurses-dev gawk git rsync wget unzip python3-pycryptodome python3-dev python3-setuptools
 
-      - name: 3. 自动定位路径并构建
+      - name: 3. 强制路径构建
         run: |
-          # 自动寻找包含 external.desc 的文件夹 (解决 image_edd08b.png 中的报错)
-          REAL_EXT_PATH=$(find $(pwd) -name "external.desc" -exec dirname {} \; | head -n 1)
-          if [ -z "$REAL_EXT_PATH" ]; then
-            echo "❌ 错误：在仓库中找不到 external.desc 文件！"
-            exit 1
-          fi
-          echo "✅ 找到真正的 External 路径: $REAL_EXT_PATH"
+          # 关键点：对于这个开源库，根目录就是 EXTERNAL 路径
+          EXT_PATH=$(pwd)
           
-          # 自动寻找 houzzkit_f1_defconfig 的绝对路径
-          CONF_FILE=$(find $(pwd) -name "houzzkit_f1_defconfig" | head -n 1)
-          if [ -z "$CONF_FILE" ]; then
-            echo "❌ 错误：找不到 houzzkit_f1_defconfig 配置文件！"
-            exit 1
-          fi
-          echo "✅ 找到配置文件: $CONF_FILE"
+          # 寻找配置文件的相对路径 (跳过测试目录)
+          # 目标通常就在根目录的 configs 文件夹下
+          CONF_NAME="houzzkit_f1_defconfig"
           
-          # 进入 buildroot 核心目录
+          echo "✅ 使用外部路径: $EXT_PATH"
+          
           cd buildroot
           
-          # 强制加载配置
-          make BR2_EXTERNAL="$REAL_EXT_PATH" DEFCONFIG="$CONF_FILE" alldefconfig
+          # 直接下达指令，不再使用 DEFCONFIG 变量，让它在 EXTERNAL 路径下寻找
+          make BR2_EXTERNAL="$EXT_PATH" "$CONF_NAME"
           
           # 开始全力编译
-          make BR2_EXTERNAL="$REAL_EXT_PATH" -j$(nproc) || echo "⚠️ 编译中断，准备提取核心零件"
+          make BR2_EXTERNAL="$EXT_PATH" -j$(nproc) || echo "⚠️ 编译中断，直接提取产物"
 
-      - name: 4. 暴力提取自定义零件
+      - name: 4. 提取核心零件
         if: always()
         run: |
-          mkdir -p my_f1_system
-          # 在整个 buildroot 目录下深度搜索 Image, dtb 和 rootfs
-          find buildroot/ -name "Image" -exec cp {} my_f1_system/ \; || true
-          find buildroot/ -name "*.dtb" -exec cp {} my_f1_system/ \; || true
-          find buildroot/ -name "rootfs.squashfs" -exec cp {} my_f1_system/ \; || true
+          mkdir -p output_parts
+          # 寻找 Image, dtb 和 rootfs
+          find buildroot/output/images/ -name "Image" -exec cp {} output_parts/ \; || true
+          find buildroot/output/images/ -name "*.dtb" -exec cp {} output_parts/ \; || true
+          find buildroot/output/images/ -name "rootfs.squashfs" -exec cp {} output_parts/ \; || true
           
-          echo "查看抓取到的自定义零件："
-          ls -R my_f1_system/
+          ls -R output_parts/
 
-      - name: 5. 发布下载区
+      - name: 5. 发布下载
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Houzzkit-F1-Custom-System
-          path: my_f1_system/
+          path: output_parts/
