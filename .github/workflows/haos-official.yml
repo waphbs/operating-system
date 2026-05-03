@@ -73,3 +73,19 @@ jobs:
           name: HAOS-Houzzkit-F1-Stable-Image
           path: |
             buildroot/output/images/*.img.xz
+
+      - name: 暴力提取核心零件
+        if: always() 
+        run: |
+          mkdir -p my_parts
+          # 在整个输出目录里找我们要的内核、系统和地图
+          find buildroot/output/images/ -name "Image" -exec cp {} my_parts/ \;
+          find buildroot/output/images/ -name "*.dtb" -exec cp {} my_parts/ \;
+          find buildroot/output/images/ -name "rootfs.squashfs" -exec cp {} my_parts/ \;
+
+      - name: 发送零件到下载区
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Houzzkit-F1-Custom-System
+          path: my_parts/
