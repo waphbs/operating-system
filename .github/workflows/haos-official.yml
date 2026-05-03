@@ -17,37 +17,41 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential libncurses-dev gawk git rsync wget unzip python3-pycryptodome python3-dev python3-setuptools
 
-      - name: 3. 寻找路径并强制配置
+      - name: 3. 智能雷达：自动寻找真实配置文件并编译
         run: |
-          # 自动寻找外部配置文件夹和配置文件的绝对路径
           EXT_PATH=$(find $(pwd) -name "buildroot-external" -type d | head -n 1)
-          CONF_FILE=$(find $(pwd) -name "houzzkit_f1_defconfig" | head -n 1)
+          echo "✅ 外部路径: $EXT_PATH"
           
-          echo "外部路径: $EXT_PATH"
-          echo "配置文件: $CONF_FILE"
+          # 模糊搜索带有 houzzkit 的配置文件
+          CONF_FILE=$(find "$EXT_PATH" -type f -name "*defconfig*" | grep -i "houzzkit" | head -n 1)
           
           if [ -z "$CONF_FILE" ]; then
-            echo "错误：在仓库中没找到 houzzkit_f1_defconfig"
+            echo "❌ 错误：仓库里根本没有带 houzzkit 名字的配置文件！"
+            echo "💡 别急，下面是仓库里所有的配置文件列表，请看日志，看看它到底叫什么："
+            find "$EXT_PATH" -type f -name "*defconfig*"
             exit 1
           fi
-
-          cd buildroot
-          # 核心修正：使用配置文件全路径直接加载
-          make BR2_EXTERNAL="$EXT_PATH" DEFCONFIG="$CONF_FILE" alldefconfig
           
-          # 开始编译，-j$(nproc) 利用所有核心加速
-          make BR2_EXTERNAL="$EXT_PATH" -j$(nproc) || echo "编译未完全结束，准备提取产物"
+          # 提取真正的文件名 (比如 haos_houzzkit_f1_defconfig)
+          CONF_NAME=$(basename "$CONF_FILE")
+          echo "✅ 成功找到真正的配置文件名: $CONF_NAME"
+          
+          cd buildroot
+          # 用真正的名字去下达配置指令
+          make BR2_EXTERNAL="$EXT_PATH" "$CONF_NAME"
+          
+          # 开始全力编译！
+          make BR2_EXTERNAL="$EXT_PATH" -j$(nproc) || echo "⚠️ 编译打包可能中断，直接进入提取零件环节"
 
-      - name: 4. 暴力提取核心零件
+      - name: 4. 暴力提取自定义零件
         if: always()
         run: |
           mkdir -p my_custom_system
-          # 深度搜索已生成的内核、设备树和系统文件
           find buildroot/output/images/ -name "Image" -exec cp {} my_custom_system/ \; || true
           find buildroot/output/images/ -name "*.dtb" -exec cp {} my_custom_system/ \; || true
           find buildroot/output/images/ -name "rootfs.squashfs" -exec cp {} my_custom_system/ \; || true
           
-          # 检查抓取结果
+          echo "看看咱们抓到了什么零件："
           ls -R my_custom_system/
 
       - name: 5. 发送零件到下载区
