@@ -12,27 +12,37 @@ jobs:
         with:
           submodules: recursive
 
-      - name: 2. 安装编译环境 (已修复包名)
+      - name: 2. 安装编译环境
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential libncurses-dev gawk git rsync wget unzip python3-pycryptodome python3-dev python3-setuptools
 
-      - name: 3. 开始构建自定义系统 (Houzzkit F1)
+      - name: 3. 寻找并配置构建选项
         run: |
-          # 配置针对 F1 的编译选项
-          make BR2_EXTERNAL=buildroot-external -C buildroot houzzkit_f1_defconfig
-          # 开始正式编译，即使报错也继续，为了提取已经生成的零件
-          make -C buildroot -j$(nproc) || echo "打包镜像可能失败，但核心零件可能已就绪"
+          # 自动寻找 buildroot-external 文件夹的确切位置
+          EXT_PATH=$(pwd)/buildroot-external
+          if [ ! -d "$EXT_PATH" ]; then
+            EXT_PATH=$(find $(pwd) -name "buildroot-external" -type d | head -n 1)
+          fi
+          echo "找到外部路径: $EXT_PATH"
+          
+          # 进入 buildroot 目录开始操作
+          cd buildroot
+          # 修复路径指向问题
+          make BR2_EXTERNAL="$EXT_PATH" houzzkit_f1_defconfig
+          
+          # 开始编译 (设置超时或忽略错误以确保进入零件提取环节)
+          make BR2_EXTERNAL="$EXT_PATH" -j$(nproc) || echo "编译中断，准备提取已有产物"
 
       - name: 4. 暴力提取自定义系统零件
         if: always()
         run: |
           mkdir -p custom_system_parts
-          # 寻找并拷贝 Image (自定义内核), dtb (硬件地图), rootfs (纯净HAOS系统)
-          find buildroot/output/images/ -name "Image" -exec cp {} custom_system_parts/ \; || true
-          find buildroot/output/images/ -name "*.dtb" -exec cp {} custom_system_parts/ \; || true
-          find buildroot/output/images/ -name "rootfs.squashfs" -exec cp {} custom_system_parts/ \; || true
-          # 检查一下有没有抓到零件
+          # 递归搜索所有编译生成的 Image, dtb 和 rootfs
+          find . -name "Image" -exec cp {} custom_system_parts/ \; || true
+          find . -name "*.dtb" -exec cp {} custom_system_parts/ \; || true
+          find . -name "rootfs.squashfs" -exec cp {} custom_system_parts/ \; || true
+          # 看看抓到了什么
           ls -R custom_system_parts/
 
       - name: 5. 将零件发布到下载区
